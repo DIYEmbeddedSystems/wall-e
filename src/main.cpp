@@ -34,6 +34,7 @@
 
 #include "led.h"                /* built-in LED */
 #include "webServer.h"          /* web server and file system */
+#include "webSocketServer.h"    /* websocket server */
 
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -60,6 +61,10 @@ DupLogger logger(SerialLogger::getDefault(), loggerUdp); // log to both Serial a
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
 
 /* ~~~~~ Platform initialization ~~~~~ */
+
+/**
+ * @brief Set up software runtime
+ */
 void setup()
 {
   ledOff();
@@ -100,22 +105,34 @@ void setup()
 
   logger.info("Wifi is up. I'm %s", WiFi.localIP().toString().c_str());
 
-  /* Set up file system and web server */
-  setupWebServer();
+  /* Start up file system */
+  LittleFS.begin();
+  logger.info("File system is up:");
+  logger.info(filesJSON().c_str());
 
-
+  /* Start up webserver */
+  webServerSetup();
   logger.info("Web server is up");
+
+  /* Start up Websocket server */
+  webSocketServerSetup();
+  logger.info("WebSocket server is up");
 
   logger.info("\n\nSetup done!\n\n");
 }
 
-
+/**
+ * @brief Main loop
+ */
 void loop()
 {
   heartBeat();
+  webSocketServerLoop();
 }
 
-
+/**
+ * @brief Periodically output liveness info
+ */
 void heartBeat()
 {
   static uint32_t nextMs = 0;
@@ -130,6 +147,7 @@ void heartBeat()
       nextMs += periodMs;
     }
   
-    logger.info("Hello at %06u", millis());
+    logger.info("At %06u: %u connected clients", 
+        millis(), wsServer.count());
   }
 }

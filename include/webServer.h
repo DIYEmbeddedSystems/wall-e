@@ -15,7 +15,7 @@
 
 extern AsyncWebServer httpServer;
 
-void setupWebServer();
+void webServerSetup();
 String filesJSON();
 String versionJSON();
 const char *getSizeFormat(int size);

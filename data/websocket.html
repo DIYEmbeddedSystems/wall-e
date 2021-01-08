@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ESP8266 Web Server</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="icon" href="data:,">
+  </head>
+  <body>
+    <h1>ESP8266 Websockets test interface</h1>
+    <p>
+      <textarea id="urlTxt" rows="1" cols="30">ws://192.168.1.182/ws</textarea>
+      <button class="btn" id="connectBtn">Connect</button>
+    </p>
+    <p>
+      <textarea id="msgTxt" placeholder="your message here" rows="1" cols="30"></textarea>
+      <button class="btn" id="sendBtn">Send</button>
+    </p>
+    <p>
+      <textarea id="logTxt" placeholder="log" rows="25" cols="80"></textarea>
+    </p>
+  </body>
+
+  <script>
+
+var urlTxt = document.getElementById("urlTxt");
+var msgTxt = document.getElementById("msgTxt");
+var logTxt = document.getElementById("logTxt");
+
+var connectBtn = document.getElementById("connectBtn");
+var sendBtn = document.getElementById("sendBtn");
+
+var socket = undefined;
+
+function log(msg) {
+  // print on standard console
+  console.log(msg);
+  // Append to log textarea
+  logTxt.value += "\n" + msg;
+  // Scroll to bottom
+  logTxt.scrollTop = logTxt.scrollHeight;
+}
+
+connectBtn.onclick = function(evt) {
+  var url = urlTxt.value;
+  log("! Attempting to connect to " + url);
+  socket = new WebSocket(url);
+
+  socket.onmessage = function(evt) {
+    log("<- " + evt.data);
+  }
+
+  socket.onclose = function(evt) {
+    log("! Socket closed");
+    socket = undefined;
+  }
+
+  socket.onerror = function(evt) {
+    log("! Socket error" + JSON.stringify(evt));
+    socket.close();
+  }
+}
+
+sendBtn.onclick = function(evt) {
+  var msg = msgTxt.value;
+  if (socket == undefined)
+  {
+    log("! Not connected");
+  }
+  else
+  {
+    log("-> " + msg);
+    socket.send(msg);
+  }
+}
+  </script>
+</html>
