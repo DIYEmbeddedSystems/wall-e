@@ -33,6 +33,7 @@
 #include <DupLogger.h>          /* Send logs to multiple channels */
 
 #include "led.h"                /* built-in LED */
+#include "webServer.h"          /* web server and file system */
 
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -53,6 +54,7 @@ WiFiUDP Udp;
 UdpLogger loggerUdp(Udp, IPAddress(192,168,1,105), 8888, "UDP", LOG_ALL);
 DupLogger logger(SerialLogger::getDefault(), loggerUdp); // log to both Serial and UDP
 
+
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function implementation
    ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ */
@@ -71,6 +73,8 @@ void setup()
   logger.info("\n\n\n");
   logger.info("Application " __FILE__ " compiled " BUILD_DATE);
 
+  /* Setup WiFi */
+
   WiFi.mode(WIFI_STA);
   WiFi.hostname("Wall-E");
   WiFi.config(
@@ -80,6 +84,8 @@ void setup()
       IPAddress(8,8,8,8));         /* DNS */
 
   logger.info("Connecting to " WIFI_STASSID);
+  WiFi.disconnect();
+  WiFi.mode(WIFI_STA);
   WiFi.begin(WIFI_STASSID, WIFI_STAPSK);
   while (WiFi.status() != WL_CONNECTED) 
   {
@@ -93,6 +99,13 @@ void setup()
   logger.info("Reset info: %s", ESP.getResetInfo().c_str());
 
   logger.info("Wifi is up. I'm %s", WiFi.localIP().toString().c_str());
+
+  /* Set up file system and web server */
+  setupWebServer();
+
+
+  logger.info("Web server is up");
+
   logger.info("\n\nSetup done!\n\n");
 }
 
@@ -106,7 +119,7 @@ void loop()
 void heartBeat()
 {
   static uint32_t nextMs = 0;
-  const uint32_t periodMs = 10000;
+  const uint32_t periodMs = 1000;
 
   ledBlink(10, 990);
 
