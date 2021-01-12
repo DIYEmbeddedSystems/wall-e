@@ -32,9 +32,17 @@
 #include <UDPLogger.h>          /* Send logs to a UDP server */
 #include <DupLogger.h>          /* Send logs to multiple channels */
 
-#include "led.h"                /* built-in LED */
 #include "webServer.h"          /* web server and file system */
 #include "webSocketServer.h"    /* websocket server */
+
+/* Actuators */
+#include "led.h"                /* built-in LED */
+
+/* I2C OLED screen */
+#include <Wire.h>
+#include <Adafruit_GFX.h>
+#include "Adafruit_SSD1306.h"
+#include "images.h"
 
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -55,6 +63,8 @@ WiFiUDP Udp;
 UdpLogger loggerUdp(Udp, IPAddress(192,168,1,105), 8888, "UDP", LOG_ALL);
 DupLogger logger(SerialLogger::getDefault(), loggerUdp); // log to both Serial and UDP
 
+
+Adafruit_SSD1306 oledDisplay(0);
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function implementation
@@ -119,6 +129,16 @@ void setup()
 
   logger.info("WebSocket server is up");
 
+  /* Start up OLED display screen */
+  Wire.begin();
+  Wire.setClock(400 * 1000); // according to implementation, supports 1 kHz to 400 kHz clock frequency
+  oledDisplay.setRotation(2);
+  oledDisplay.clearDisplay();
+  oledDisplay.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  oledDisplay.drawBitmap(0, 0, walle_splash, walle_splash_width, walle_splash_height, 1);
+  oledDisplay.display();
+  logger.info("Display is up");
+
   logger.info("\n\nSetup done!\n\n");
 }
 
@@ -148,8 +168,18 @@ void heartBeat()
       nextMs += periodMs;
     }
   
-    logger.info("At %06u: %u connected clients", 
-        millis(), wsServer.count());
+    char msg[256];
+    snprintf(msg, sizeof(msg), "At %06u: %u clients, %ukB free",
+        millis(), wsServer.count(), (unsigned int)(ESP.getFreeHeap()/1024));
+
+    logger.info(msg);
+
+    oledDisplay.clearDisplay();
+    oledDisplay.setTextSize(1);
+    oledDisplay.setTextColor(WHITE);
+    oledDisplay.setCursor(0,0);
+    oledDisplay.print(msg);
+    oledDisplay.display();
   }
 }
 
