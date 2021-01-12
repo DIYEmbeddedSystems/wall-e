@@ -63,8 +63,11 @@ WiFiUDP Udp;
 UdpLogger loggerUdp(Udp, IPAddress(192,168,1,105), 8888, "UDP", LOG_ALL);
 DupLogger logger(SerialLogger::getDefault(), loggerUdp); // log to both Serial and UDP
 
-
+/* I2C OLED screen */
 Adafruit_SSD1306 oledDisplay(0);
+
+/* last message from remote controller page */
+char userMessage[128] = "(user message)";
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function implementation
@@ -169,8 +172,8 @@ void heartBeat()
     }
   
     char msg[256];
-    snprintf(msg, sizeof(msg), "At %06u: %u clients, %ukB free",
-        millis(), wsServer.count(), (unsigned int)(ESP.getFreeHeap()/1024));
+    snprintf(msg, sizeof(msg), "At %06u: %u clients, %ukB free. %s",
+        millis(), wsServer.count(), (unsigned int)(ESP.getFreeHeap()/1024), userMessage);
 
     logger.info(msg);
 

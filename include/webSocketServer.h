@@ -14,6 +14,8 @@
 
 #include <ArduinoJson.h>
 
+#define JSON_MEMORY_SIZE 1024   /* memory limit for JSON command frame */
+
 extern AsyncWebSocket wsServer;
 
 void webSocketServerSetup();
@@ -26,4 +28,6 @@ void websocketEventHandler(AsyncWebSocket * server, AsyncWebSocketClient * clien
 void webSocketClientConnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client);
 void webSocketClientDisconnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client);
 void webSocketTextFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, const uint8_t *payload, size_t len);
+void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, StaticJsonDocument<JSON_MEMORY_SIZE> &jsonDoc);
+
 #endif

@@ -15,14 +15,17 @@
 #include <ESPAsyncWebServer.h>
 #include <AsyncWebSocket.h>
 #include <LittleFS.h>           /* LittleFS flash filesystem (replaces deprecated SPIFFS)*/
+#include <ArduinoJson.h>        /* JSON parsing */
 
 #include <DupLogger.h>          /* Logging library */
+
 
 extern DupLogger logger;        /* logger to be used (defined in main) */
 extern AsyncWebServer httpServer; /* main AsyncTCP server */
 
 AsyncWebSocket wsServer("/ws");  /* Websocket server instance */
 
+extern char userMessage[128];
 
 /**
  * @brief Configure websocket server
@@ -129,8 +132,39 @@ void webSocketClientDisconnectHandler(AsyncWebSocket * server, AsyncWebSocketCli
  */
 void webSocketTextFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, const uint8_t *payload, size_t len)
 {
+    static StaticJsonDocument<JSON_MEMORY_SIZE> jsonDoc;
+
     logger.info("[WS] #%u <- `%.*s`", 
           client->id(), len, payload);
-    // Broadcast to all connected clients
-    server->textAll((const char*)payload, len);
+    // Is message a JSON?
+    DeserializationError error = deserializeJson(jsonDoc, (const char *)payload);
+    if (!error)
+    {
+      // message payload is valid JSON
+      webSocketJsonFrameHandler(server, client, jsonDoc);
+    }
+    else
+    {
+      // message is not valid JSON
+      // Default behavior: broadcast message to all connected clients
+      server->textAll((const char*)payload, len);
+    }
+}
+
+/**
+ * @brief This handler is called whenever a valid JSON is received from client
+ */
+void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, StaticJsonDocument<JSON_MEMORY_SIZE> &jsonDoc)
+{
+  const char *message = jsonDoc["message"];
+  if (message) 
+  {
+    // copy message from JSON payload to global variable 
+    snprintf(userMessage, sizeof(userMessage), message);
+    logger.info("[WS] <-- message: %s", userMessage);
+  }
+  else
+  {
+    logger.info("[WS] message field not found");
+  }
 }
