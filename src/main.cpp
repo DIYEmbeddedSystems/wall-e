@@ -13,7 +13,7 @@
 #include "version.h"            /* Versioning macros, generated in the build_version.py script */
 #include <Arduino.h>            /* The Arduino framework */
 /* ~~~~~ Generic libraries for ESP8266: */
-#include <GDBStub.h>            /* Enable debugging */
+// #include <GDBStub.h>            /* Enable debugging */
 #include <Esp.h>                /* Get infos about ESP reset, stack/heap, etc. */
 #include <ESP8266WiFi.h>        /* WiFi functions */
 #include <ESPAsyncTCP.h>        /* Asynchronous web and websocket servers  */
@@ -70,7 +70,7 @@ void setup()
   ledOff();
   Serial.begin(115200);
   while (!Serial) continue;
-  gdbstub_init();
+//  gdbstub_init();
 
   // let power rails stabilize, and let PlatformIO monitor time to start
   delay(1000); 
@@ -116,6 +116,7 @@ void setup()
 
   /* Start up Websocket server */
   webSocketServerSetup();
+
   logger.info("WebSocket server is up");
 
   logger.info("\n\nSetup done!\n\n");
@@ -151,3 +152,4 @@ void heartBeat()
         millis(), wsServer.count());
   }
 }
+

@@ -13,6 +13,7 @@
 #include <ESP8266WiFi.h>        /* WiFi functions */
 #include <ESPAsyncTCP.h>        /* Asynchronous web and websocket servers  */
 #include <ESPAsyncWebServer.h>
+#include <AsyncWebSocket.h>
 #include <LittleFS.h>           /* LittleFS flash filesystem (replaces deprecated SPIFFS)*/
 
 #include <DupLogger.h>          /* Logging library */
@@ -66,12 +67,11 @@ void websocketEventHandler(AsyncWebSocket * server, AsyncWebSocketClient * clien
   switch (eventType)
   {
   case WS_EVT_CONNECT:
-    logger.info("[WS] New client #%u (%s)", client->id(), client->remoteIP().toString().c_str());
-    client->text("Welcome");
+    webSocketClientConnectHandler(server, client);
     break;
 
   case WS_EVT_DISCONNECT:
-    logger.info("[WS] Client #%u disconnected", client->id());
+    webSocketClientDisconnectHandler(server, client);
     break;
 
   case WS_EVT_PONG:
@@ -86,14 +86,11 @@ void websocketEventHandler(AsyncWebSocket * server, AsyncWebSocketClient * clien
     }
     else if (frameInfo->opcode != WS_TEXT)
     {
-      logger.warn("[WS] binary frame not supported");
+      logger.warn("[WS] BIN frame not supported");
     }
     else
     {
-      logger.info("[WS] Client #%u: has message '%.*s'", 
-          client->id(), len, payload);
-      // Simply echo
-      wsServer.textAll(payload, len);
+      webSocketTextFrameHandler(server, client, payload, len);
     }
     break;
 
@@ -102,6 +99,38 @@ void websocketEventHandler(AsyncWebSocket * server, AsyncWebSocketClient * clien
     break;
 
   default:
+    logger.error("[WS] Event type %u not supported", eventType);
     break;
   }
+}
+
+/**
+ * @brief This handler is called whenever a client connects
+ */
+void webSocketClientConnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client)
+{
+  char msg[256];
+  snprintf(msg, sizeof(msg), "New client #%u (%s)", client->id(), client->remoteIP().toString().c_str());
+  logger.info("[WS] %s", msg);
+  
+  client->text(msg);
+}
+
+/**
+ * @brief This handler is called whenever a client discconnects
+ */
+void webSocketClientDisconnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client)
+{
+  logger.info("[WS] Client #%u disconnected", client->id());
+}
+
+/**
+ * @brief This handler is called whenever a text frame is received for client
+ */
+void webSocketTextFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, const uint8_t *payload, size_t len)
+{
+    logger.info("[WS] #%u <- `%.*s`", 
+          client->id(), len, payload);
+    // Broadcast to all connected clients
+    server->textAll((const char*)payload, len);
 }

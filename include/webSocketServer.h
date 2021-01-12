@@ -23,4 +23,7 @@ void websocketEventHandler(AsyncWebSocket * server, AsyncWebSocketClient * clien
     AwsEventType eventType, void * arg, uint8_t *payload, size_t len);
 
 
+void webSocketClientConnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client);
+void webSocketClientDisconnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client);
+void webSocketTextFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, const uint8_t *payload, size_t len);
 #endif

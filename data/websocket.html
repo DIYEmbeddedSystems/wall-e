@@ -33,31 +33,46 @@ var sendBtn = document.getElementById("sendBtn");
 var socket = undefined;
 
 function log(msg) {
-  // print on standard console
+  var now = new Date();
+  var timestamp = ("00" + now.getHours()).slice(-2) + ':'
+      + ("00" + now.getMinutes()).slice(-2) + ':'
+      + ("00" + now.getSeconds()).slice(-2) + '.' 
+      + ("000" + now.getMilliseconds()).slice(-3);
+       // print on standard console
   console.log(msg);
   // Append to log textarea
-  logTxt.value += "\n" + msg;
+  logTxt.value += "\n" + "[" + timestamp + "]" + msg;
   // Scroll to bottom
   logTxt.scrollTop = logTxt.scrollHeight;
 }
 
 connectBtn.onclick = function(evt) {
   var url = urlTxt.value;
-  log("! Attempting to connect to " + url);
-  socket = new WebSocket(url);
-
-  socket.onmessage = function(evt) {
-    log("<- " + evt.data);
-  }
-
-  socket.onclose = function(evt) {
-    log("! Socket closed");
-    socket = undefined;
-  }
-
-  socket.onerror = function(evt) {
-    log("! Socket error" + JSON.stringify(evt));
+  if (socket != undefined) {
+    log("! Closing websocket");
     socket.close();
+  }
+  else
+  {
+    log("! Attempting to connect to " + url);
+    socket = new WebSocket(url);
+
+    socket.onmessage = function(evt) {
+      log("          <- " + evt.data);
+    }
+
+    socket.onclose = function(evt) {
+      log("! Socket closed");
+      socket = undefined;
+      connectBtn.innerHTML = "Connect";
+    }
+
+    socket.onerror = function(evt) {
+      log("! Socket error" + JSON.stringify(evt));
+      socket.close();
+    }
+
+    connectBtn.innerHTML = "Disconnect";
   }
 }
 
