@@ -44,6 +44,9 @@
 #include "Adafruit_SSD1306.h"
 #include "images.h"
 
+/* Servos */
+#include <pca9685_servo.h>
+
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function declarations / prototypes
@@ -52,6 +55,8 @@
 void setup();
 void loop();
 void heartBeat();
+void actuatorsLoop();
+void reportState();
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Global variables & object instances
@@ -65,6 +70,17 @@ DupLogger logger(SerialLogger::getDefault(), loggerUdp); // log to both Serial a
 
 /* I2C OLED screen */
 Adafruit_SSD1306 oledDisplay(0);
+
+/* Servos: limited to 60° per second speed */
+SlowServo servos[] = 
+{
+  SlowServo(12, 60.0),
+  SlowServo(13, 60.0),
+  SlowServo(14, 60.0),
+  SlowServo(15, 60.0)
+};
+#define NUM_SERVOS ((int)(sizeof(servos) / sizeof(servos[0])))
+
 
 /* last message from remote controller page */
 char userMessage[128] = "(user message)";
@@ -91,8 +107,18 @@ void setup()
   logger.info("\n\n\n");
   logger.info("Application " __FILE__ " compiled " BUILD_DATE);
 
-  /* Setup WiFi */
 
+  /* Start up OLED display screen */
+  Wire.begin();
+  Wire.setClock(400 * 1000); // according to implementation, supports 1 kHz to 400 kHz clock frequency
+  oledDisplay.setRotation(2);
+  oledDisplay.clearDisplay();
+  oledDisplay.begin(SSD1306_SWITCHCAPVCC, 0x3C);
+  oledDisplay.drawBitmap(0, 0, walle_splash, walle_splash_width, walle_splash_height, 1);
+  oledDisplay.display();
+  logger.info("Display is up");
+
+  /* Setup WiFi */
   WiFi.mode(WIFI_STA);
   WiFi.hostname("Wall-E");
   WiFi.config(
@@ -111,7 +137,6 @@ void setup()
     delay(10);
   }
 
-  logger.info("Version " GIT_DESCRIPTION " commit " GIT_COMMIT_DATE);
   logger.info(BUILD_DETAILS);
   logger.info("Reset reason: %s", ESP.getResetReason().c_str());
   logger.info("Reset info: %s", ESP.getResetInfo().c_str());
@@ -132,15 +157,14 @@ void setup()
 
   logger.info("WebSocket server is up");
 
-  /* Start up OLED display screen */
-  Wire.begin();
-  Wire.setClock(400 * 1000); // according to implementation, supports 1 kHz to 400 kHz clock frequency
-  oledDisplay.setRotation(2);
-  oledDisplay.clearDisplay();
-  oledDisplay.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  oledDisplay.drawBitmap(0, 0, walle_splash, walle_splash_width, walle_splash_height, 1);
-  oledDisplay.display();
-  logger.info("Display is up");
+  /* Setup servos */
+  for (int i = 0; i < NUM_SERVOS; i++)
+  {
+    servos[i].begin();
+    servos[i].blockingMoveTo(5);
+    servos[i].blockingMoveTo(0);
+  }
+  logger.info("Servos are up");
 
   logger.info("\n\nSetup done!\n\n");
 }
@@ -150,8 +174,29 @@ void setup()
  */
 void loop()
 {
+  uint32_t t0 = micros();
+
   heartBeat();
+
+  uint32_t t1 = micros();
+
   webSocketServerLoop();
+
+  uint32_t t2 = micros();
+
+  actuatorsLoop();
+
+  uint32_t t3 = micros();
+
+  reportState();
+
+  uint32_t t4 = micros();
+
+  if ((t4 - t0) > 10000) 
+  {
+    logger.info("Loop %lu µs: heartbeat %lu, WS %lu, act %lu, report %lu", 
+      t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3);
+  }
 }
 
 /**
@@ -172,8 +217,8 @@ void heartBeat()
     }
   
     char msg[256];
-    snprintf(msg, sizeof(msg), "At %06u: %u clients, %ukB free. %s",
-        millis(), wsServer.count(), (unsigned int)(ESP.getFreeHeap()/1024), userMessage);
+    snprintf(msg, sizeof(msg), "At %3u: %u clients, %ukB free. %s                                          ",
+        (unsigned int)millis()/1000, wsServer.count(), (unsigned int)(ESP.getFreeHeap()/1024), userMessage);
 
     logger.info(msg);
 
@@ -186,3 +231,78 @@ void heartBeat()
   }
 }
 
+/**
+ * @brief Update servo position
+ */
+void actuatorsLoop()
+{
+  static uint32_t nextMs = 5;
+  const uint32_t periodMs = 10;
+
+  if (1) //(int32_t)(millis() - nextMs) >= 0)
+  {
+    while ((int32_t)(millis() - nextMs) >= 0)
+    {
+      nextMs += periodMs;
+    }
+
+    for (int i = 0; i < NUM_SERVOS; i++)
+    {
+      servos[i].update();
+    }
+  }
+}
+
+/**
+ * @brief Periodically send current actuators state to connected controller(s)
+ */
+void reportState()
+{
+  static uint32_t nextMs = 8;
+  const uint32_t periodMs = 200;
+
+  char msg[256];
+
+  if ((int32_t)(millis() - nextMs) >= 0)
+  {
+    while ((int32_t)(millis() - nextMs) >= 0)
+    {
+      nextMs += periodMs;
+    }
+
+    // Build up JSON representation of current state
+    snprintf(msg, sizeof(msg), "{\"ms\":%lu,\"servos\":[%d,%d,%d,%d]}",
+        millis(), 
+        servos[0].getPos(), servos[1].getPos(), servos[2].getPos(), servos[3].getPos());
+    
+    // Send to all connected clients
+    wsServer.textAll(msg);
+//    logger.info(msg);
+  }
+}
+
+/**
+ * @brief This handler is called whenever a valid JSON is received from client
+ */
+void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, StaticJsonDocument<JSON_MEMORY_SIZE> &jsonDoc)
+{
+  const char *message = jsonDoc["message"];
+  if (message) 
+  {
+    // copy message from JSON payload to global variable 
+    snprintf(userMessage, sizeof(userMessage), message);
+    logger.info("[WS] <-- message: %s", userMessage);
+  }
+
+  JsonArray servoArray = jsonDoc["servos"].as<JsonArray>();
+  if (servoArray.size() == NUM_SERVOS)
+  {
+    for (int i = 0; i < NUM_SERVOS; ++i)
+    {
+      int pos = servoArray[i].as<int>();
+//      logger.info("[WS] <-- servo[%d].moveTo(%d)", i, pos);
+      pos = constrain(pos, -90, 90);
+      servos[i].moveTo(pos);
+    }
+  }
+}

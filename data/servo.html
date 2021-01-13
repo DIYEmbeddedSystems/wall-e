@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html>
+  <head>
+    <title>ESP8266 Web Server</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0">
+    <link rel="icon" href="data:,">
+    <style>
+    html { 
+      background-color: #ffffff; 
+      overflow:hidden; 
+      text-align:center;
+    }
+    body { 
+      font-family: Arial, Calibri; 
+      width: 100%; 
+      margin: 0px;
+      color: #000000;
+      background-color:#ffe7d0; 
+      padding: 0px; 
+      height: 100%;
+    }    
+
+    .btn {
+      border: none;
+      color: #ffffff;
+      padding: 4px 4px;
+      font-size: 15px;
+      text-align: center;
+      text-decoration: none;
+      display: inline-block;
+      margin: 4px auto;
+      border-radius: 8px;
+      opacity: 0.7;
+    }
+
+    .btn.red {
+      background-color: #873b3b;
+    }
+
+    .btn.green {
+      background-color: #3b883b;
+    }
+
+    .btn:hover {
+      opacity: 1
+    }
+
+    input[type=range] {
+      width: 95%;
+    }
+
+    input[type=range].vertical {
+      -webkit-transform:rotate(270deg);       
+      -moz-transform:rotate(270deg);
+      -o-transform:rotate(270deg);
+      -ms-transform:rotate(270deg);
+      transform:rotate(270deg);
+      height: 95%;
+	  }
+
+    table, th, tr {
+      width: 100%;
+      border: 1px solid #ddd;
+      border-collapse: collapse;
+      text-align: center;
+    } 
+    tr:hover {
+      background-color: #7777;
+    }
+    </style>
+  </head>
+  <body>
+    <h1>ESP8266 Websockets servo interface</h1>
+    <table>
+      <tr>
+        <td width="75%">
+          <textarea id="urlTxt" rows="1" cols="30">ws://192.168.1.182/ws</textarea>
+        </td>
+        <td>
+          <button class="btn green" id="connectBtn">Connect</button>  
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <textarea id="msgTxt" placeholder="your message here" rows="1" cols="30"></textarea>
+        </td>
+        <td>
+          <button class="btn green" id="sendBtn">Send</button>
+        </td>
+      </tr>
+    </table>
+    
+    <table>
+      <tr>
+        <th colspan="2">
+          Input
+        </th>
+        <th>
+          Command
+        </th>
+        <th>
+          State
+        </th>
+      </tr>
+      <tr>
+        <td rowspan = "4" width="20%">
+          <input class="range vertical" type="range" id="input0" min="-90" max="90" value="0" oninput="inputChange()">
+        </td>
+        <td></td>
+        <td>
+          <span id="cmd0">0&deg;</span>
+        </td>
+        <td>
+          <span id="feedback0">0&deg;</span>
+        </td>
+      </tr>
+      <tr>
+        <td width="60%">
+          <input class="range horizontal" type="range" id="input1" min="-90" max="90" value="0" oninput="inputChange()">
+        </td>
+        <td>
+          <span id="cmd1">0&deg;</span>
+        </td>
+        <td>
+          <span id="feedback1">0&deg;</span>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <input class="range horizontal" type="range" id="input2" min="-90" max="90" value="0" oninput="inputChange()">
+        </td>
+        <td>
+          <span id="cmd2">0&deg;</span>
+        </td>
+        <td>
+          <span id="feedback2">0&deg;</span>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <input class="range horizontal" type="range" id="input3" min="-90" max="90" value="0" oninput="inputChange()">
+        </td>
+        <td>
+          <span id="cmd3">0&deg;</span>
+        </td>
+        <td>
+          <span id="feedback3">0&deg;</span>
+        </td>
+      </tr>
+    </table>
+
+    <table>
+      <tr>
+        <td>
+          Controller state
+        </td>  
+        <td>
+          <textarea id="controllerStateTxt" rows="1" cols="40"></textarea><br/>
+        </td>
+      </tr>
+      <tr>
+        <td>
+          Robot State
+        </td>
+        <td>
+          <textarea id="robotStateTxt" rows="1" cols="40"></textarea>
+        </td>
+      </tr>
+      <tr>
+        <td colspan="2">
+          <textarea id="logTxt" placeholder="log" rows="5" cols="80"></textarea>
+        </td>
+      </tr>
+    </table>
+
+  </body>
+
+  <script>
+
+var urlTxt = document.getElementById("urlTxt");
+var msgTxt = document.getElementById("msgTxt");
+var logTxt = document.getElementById("logTxt");
+
+var connectBtn = document.getElementById("connectBtn");
+var sendBtn = document.getElementById("sendBtn");
+
+var input0 = document.getElementById("input0");
+var input1 = document.getElementById("input1");
+var input2 = document.getElementById("input2");
+var input3 = document.getElementById("input3");
+
+var cmd0 = document.getElementById("cmd0");
+var cmd1 = document.getElementById("cmd1");
+var cmd2 = document.getElementById("cmd2");
+var cmd3 = document.getElementById("cmd3");
+
+var feedback0 = document.getElementById("feedback0");
+var feedback1 = document.getElementById("feedback1");
+var feedback2 = document.getElementById("feedback2");
+var feedback3 = document.getElementById("feedback3");
+
+var controllerStateTxt = document.getElementById("controllerStateTxt");
+var robotStateTxt = document.getElementById("robotStateTxt");
+
+var socket = undefined;
+
+var controllerState = {servos:[0,0,0,0]};
+var robotState = {servos:[0,0,0,0]};
+
+function log(msg) {
+  var now = new Date();
+  var timestamp = ("00" + now.getHours()).slice(-2) + ':'
+      + ("00" + now.getMinutes()).slice(-2) + ':'
+      + ("00" + now.getSeconds()).slice(-2) + '.' 
+      + ("000" + now.getMilliseconds()).slice(-3);
+  
+      // print on console
+  console.log(msg);
+  // Append to log textarea
+  logTxt.value += "\n" + "[" + timestamp + "]" + msg;
+  // Scroll to bottom
+  logTxt.scrollTop = logTxt.scrollHeight;
+}
+
+function inputChange() {
+  // When a range slider is moved: update controller state
+  controllerState.servos = [parseInt(input0.value), parseInt(input1.value), parseInt(input2.value), parseInt(input3.value)];
+  controllerStateTxt.value = JSON.stringify(controllerState);
+
+  cmd0.innerHTML = controllerState.servos[0] + "&deg;";
+  cmd1.innerHTML = controllerState.servos[1] + "&deg;";
+  cmd2.innerHTML = controllerState.servos[2] + "&deg;";
+  cmd3.innerHTML = controllerState.servos[3] + "&deg;";
+}
+
+function handleMessage(msg) {
+  log("          <- " + msg);
+  if (msg[0] == '{') {
+    // msg contains JSON formatted data
+    robotState = JSON.parse(msg);
+    robotStateTxt.value = JSON.stringify(robotState);
+    feedback0.innerHTML = robotState.servos[0] + "&deg;";
+    feedback1.innerHTML = robotState.servos[1] + "&deg;";
+    feedback2.innerHTML = robotState.servos[2] + "&deg;";
+    feedback3.innerHTML = robotState.servos[3] + "&deg;";
+  }
+  socket.send(JSON.stringify(controllerState));
+}
+
+function send(msg) {
+  if (socket == undefined)
+  {
+    log("! Not connected");
+  }
+  else
+  {
+    log("-> " + msg);
+    socket.send(msg);
+  }
+}
+
+connectBtn.onclick = function(evt) {
+  var url = urlTxt.value;
+  if (socket != undefined) {
+    log("! Closing websocket");
+    socket.close();
+  }
+  else
+  {
+    log("! Attempting to connect to " + url);
+    socket = new WebSocket(url);
+
+    socket.onmessage = function(evt) {
+      handleMessage(evt.data);
+    }
+
+    socket.onclose = function(evt) {
+      log("! Socket closed");
+      socket = undefined;
+      connectBtn.innerHTML = "Connect";
+      connectBtn.classList.remove("red");
+      connectBtn.classList.add("green");
+    }
+
+    socket.onerror = function(evt) {
+      log("! Socket error" + JSON.stringify(evt));
+      socket.close();
+    }
+
+    connectBtn.innerHTML = "Disconnect";
+    connectBtn.classList.add("red");
+    connectBtn.classList.remove("green");
+  }
+}
+
+sendBtn.onclick = function(evt) {
+  var msg = msgTxt.value;
+  send(msg);
+}
+  </script>
+</html>

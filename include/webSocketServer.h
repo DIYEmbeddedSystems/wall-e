@@ -28,6 +28,6 @@ void websocketEventHandler(AsyncWebSocket * server, AsyncWebSocketClient * clien
 void webSocketClientConnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client);
 void webSocketClientDisconnectHandler(AsyncWebSocket * server, AsyncWebSocketClient * client);
 void webSocketTextFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, const uint8_t *payload, size_t len);
-void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, StaticJsonDocument<JSON_MEMORY_SIZE> &jsonDoc);
+extern void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, StaticJsonDocument<JSON_MEMORY_SIZE> &jsonDoc);
 
 #endif

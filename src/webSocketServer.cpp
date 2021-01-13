@@ -25,8 +25,6 @@ extern AsyncWebServer httpServer; /* main AsyncTCP server */
 
 AsyncWebSocket wsServer("/ws");  /* Websocket server instance */
 
-extern char userMessage[128];
-
 /**
  * @brief Configure websocket server
  */
@@ -116,6 +114,12 @@ void webSocketClientConnectHandler(AsyncWebSocket * server, AsyncWebSocketClient
   snprintf(msg, sizeof(msg), "New client #%u (%s)", client->id(), client->remoteIP().toString().c_str());
   logger.info("[WS] %s", msg);
   
+  for (uint32_t i = 0; i < client->id(); i++)
+  {
+    // Close all previous clients, to keep only 1 active client
+    server->close(i);
+  }
+
   client->text(msg);
 }
 
@@ -151,20 +155,3 @@ void webSocketTextFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * c
     }
 }
 
-/**
- * @brief This handler is called whenever a valid JSON is received from client
- */
-void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, StaticJsonDocument<JSON_MEMORY_SIZE> &jsonDoc)
-{
-  const char *message = jsonDoc["message"];
-  if (message) 
-  {
-    // copy message from JSON payload to global variable 
-    snprintf(userMessage, sizeof(userMessage), message);
-    logger.info("[WS] <-- message: %s", userMessage);
-  }
-  else
-  {
-    logger.info("[WS] message field not found");
-  }
-}
