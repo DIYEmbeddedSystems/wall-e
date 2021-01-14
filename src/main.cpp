@@ -47,6 +47,8 @@
 /* Servos */
 #include <pca9685_servo.h>
 
+/* Motors */
+#include <MotorShield.h>
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function declarations / prototypes
@@ -57,6 +59,7 @@ void loop();
 void heartBeat();
 void actuatorsLoop();
 void reportState();
+void safetyCheck();
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Global variables & object instances
@@ -71,19 +74,40 @@ DupLogger logger(SerialLogger::getDefault(), loggerUdp); // log to both Serial a
 /* I2C OLED screen */
 Adafruit_SSD1306 oledDisplay(0);
 
-/* Servos: limited to 60° per second speed */
+/* Servos: an array of servos for position-commanded joints (head, arms) */
+//    "HdUp", "HdLR",         /* Head: up/down, left/right */
+//    "LAUp", "LALR", "LH",   /* Left arm: up/down, left/right, hand open/close */
+//    "RAUp", "RALR", "RH"    /* Right arm: up/down, left/right, hand open/close */
 SlowServo servos[] = 
 {
-  SlowServo(12, 60.0),
-  SlowServo(13, 60.0),
-  SlowServo(14, 60.0),
-  SlowServo(15, 60.0)
+  SlowServo( 8, 180.0),  /* head up/down */
+  SlowServo( 9, 90.0),  /* head left/right */
+  SlowServo(10, 60.0),  /* left arm up/down */
+  SlowServo(11, 60.0),  /* left arm left/right */
+  SlowServo(12, 300.0),  /* left hand open/close */
+  SlowServo(13, 60.0),  /* right arm up/down */
+  SlowServo(14, 60.0),  /* right arm left/right */
+  SlowServo(15, 300.0)   /* right hand open/close */
 };
 #define NUM_SERVOS ((int)(sizeof(servos) / sizeof(servos[0])))
 
+/* Motors: an array of motors for velocity-commanded joints (tank treads DC motors) */
+Motor motors[] = 
+{
+  Motor(0x30, Motor::motor_a),
+  Motor(0x30, Motor::motor_b)
+};
+#define NUM_MOTORS ((int)(sizeof(motors)/sizeof(motors[0])))
+/* Note: motor shield should be programmed, see: https://hackaday.io/project/162981-wemos-motor-shield-firmware-for-steppers-i2c */
+
+/* Remember last 'move' command */
+int32_t move_command[2] = {0};
 
 /* last message from remote controller page */
 char userMessage[128] = "(user message)";
+
+/* Last time we have received a proper command */
+uint32_t lastCommandMs = 0;
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function implementation
@@ -104,9 +128,9 @@ void setup()
   // let power rails stabilize, and let PlatformIO monitor time to start
   delay(1000); 
 
+  // This log line appears only on Serial link because WiFi is not up yet
   logger.info("\n\n\n");
   logger.info("Application " __FILE__ " compiled " BUILD_DATE);
-
 
   /* Start up OLED display screen */
   Wire.begin();
@@ -137,6 +161,7 @@ void setup()
     delay(10);
   }
 
+  logger.info("Application " __FILE__ " compiled " BUILD_DATE);
   logger.info(BUILD_DETAILS);
   logger.info("Reset reason: %s", ESP.getResetReason().c_str());
   logger.info("Reset info: %s", ESP.getResetInfo().c_str());
@@ -161,10 +186,20 @@ void setup()
   for (int i = 0; i < NUM_SERVOS; i++)
   {
     servos[i].begin();
-    servos[i].blockingMoveTo(5);
-    servos[i].blockingMoveTo(0);
+    servos[i].moveTo(0);
+    delay(0);
   }
+  SlowServo::outputDisable();
   logger.info("Servos are up");
+
+  /* Setup motors */
+  for (int i = 0; i < NUM_MOTORS; i++)
+  {
+    motors[i].begin();
+    motors[i].setSpeed(10);
+    delay(200);
+    motors[i].setSpeed(0);
+  }
 
   logger.info("\n\nSetup done!\n\n");
 }
@@ -192,10 +227,14 @@ void loop()
 
   uint32_t t4 = micros();
 
-  if ((t4 - t0) > 10000) 
+  safetyCheck();
+
+  uint32_t t5 = micros();
+
+  if ((t5 - t0) > 10000) 
   {
-    logger.info("Loop %lu µs: heartbeat %lu, WS %lu, act %lu, report %lu", 
-      t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3);
+    logger.info("Loop %lu µs: heartbeat %lu, WS %lu, act %lu, report %lu, safetyCheck %lu", 
+      t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4);
   }
 }
 
@@ -271,9 +310,11 @@ void reportState()
     }
 
     // Build up JSON representation of current state
-    snprintf(msg, sizeof(msg), "{\"ms\":%lu,\"servos\":[%d,%d,%d,%d]}",
+    snprintf(msg, sizeof(msg), "{\"ms\":%lu,\"servos\":[%d,%d,%d,%d,%d,%d,%d,%d],\"move\":[%d,%d]}",
         millis(), 
-        servos[0].getPos(), servos[1].getPos(), servos[2].getPos(), servos[3].getPos());
+        servos[0].getPos(), servos[1].getPos(), servos[2].getPos(), servos[3].getPos(), 
+        servos[4].getPos(), servos[5].getPos(), servos[6].getPos(), servos[7].getPos(),
+        move_command[0], move_command[1]);
     
     // Send to all connected clients
     wsServer.textAll(msg);
@@ -282,10 +323,41 @@ void reportState()
 }
 
 /**
+ * @brief Check system safety; switch to failsafe mode if necessary
+ */
+void safetyCheck()
+{
+  static uint32_t nextMs = 7;
+  const uint32_t periodMs = 500;  
+
+  if ((int32_t)(millis() - nextMs) >= 0)
+  {
+    nextMs += periodMs;
+
+    if ((int32_t)(millis() - lastCommandMs - 1000) >= 0)
+    {
+      // No communication for 1 second --> stop all moves!
+      motors[0].setSpeed(0);
+      motors[1].setSpeed(0);
+
+      SlowServo::outputDisable();
+      for (int i = 0; i < NUM_SERVOS; i++)
+      {
+        servos[i].stop();
+      }
+      
+      logger.warn("STOP IT! Communication timed out!");
+    }
+  }
+}
+
+/**
  * @brief This handler is called whenever a valid JSON is received from client
  */
 void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * client, StaticJsonDocument<JSON_MEMORY_SIZE> &jsonDoc)
 {
+  uint32_t nowMs = millis();
+
   const char *message = jsonDoc["message"];
   if (message) 
   {
@@ -300,9 +372,22 @@ void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * c
     for (int i = 0; i < NUM_SERVOS; ++i)
     {
       int pos = servoArray[i].as<int>();
-//      logger.info("[WS] <-- servo[%d].moveTo(%d)", i, pos);
       pos = constrain(pos, -90, 90);
       servos[i].moveTo(pos);
     }
+    SlowServo::outputEnable();
+    lastCommandMs = nowMs;
+  }
+
+  JsonArray motorArray = jsonDoc["move"].as<JsonArray>();
+  if (motorArray.size() == 2)
+  {
+    move_command[0] = constrain(motorArray[0].as<int>(), -100, 100); // forward / backward
+    move_command[1] = constrain(motorArray[1].as<int>(), -100, 100); // left / right
+    int leftSpeed = constrain((move_command[0] + move_command[1])/2, -100, 100);
+    int rightSpeed = constrain((move_command[0] - move_command[1])/2, -100, 100);
+    motors[0].setSpeed(leftSpeed);
+    motors[1].setSpeed(-rightSpeed);
+    lastCommandMs = nowMs;
   }
 }

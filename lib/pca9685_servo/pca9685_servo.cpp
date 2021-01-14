@@ -1,6 +1,14 @@
 /**
  * @file pca9685_servo.cpp
  * @brief Implementation of PCA9685-driven servo with soft speed limit
+ * 
+ * This library provides smooth movements for servos behind a PCA9685 controller.
+ * The PCA9685 is a 16-channel PWM controller on an I2C bus, found for instance on Adafruit's "16-Channel 12-bit 
+ * PWM/Servo shield".
+ 
+ * Each servo's angular speed is an instance-specific constant (set in ° per second). When instructed to 
+ * moveTo(position_in_degrees), this library computes parameters, and when update() is called frequently,it uses 
+ * linear interpolation to compute the servo's expected position at current time, and actuate accordingly. 
  */
 
 #include "pca9685_servo.h"
@@ -9,8 +17,8 @@
 #include <Wire.h>
 #include <Adafruit_PWMServoDriver.h>
 
-Adafruit_PWMServoDriver pwm_driver = Adafruit_PWMServoDriver(0x40);
-bool SlowServo::_pwm_driver_intialized = false;
+Adafruit_PWMServoDriver pwm_driver = Adafruit_PWMServoDriver(0x40);   /*!< high-level driver for PCA9685 */
+bool SlowServo::_pwm_driver_intialized = false;                       /*!< whether PCA9685 is already initialized */
 
 /**
  * @fn SlowServo
@@ -24,7 +32,7 @@ SlowServo::SlowServo(uint8_t pin, float max_speed_dps,
 {
   // convert speed in °/s ~~> ms/°
   _ms_per_deg = 1000.0 / constrain(max_speed_dps, 1.0, 600.);
-  _end_duty_cycle = _start_duty_cycle = (min_duty_cycle + max_duty_cycle)/2;
+  _end_duty_cycle = _start_duty_cycle = _last_duty_cycle = (min_duty_cycle + max_duty_cycle)/2;
   _end_ms = _start_ms = millis();
 }
 
@@ -45,7 +53,7 @@ void SlowServo::begin()
 
     Serial.printf("Enabling PWM output\n");
     pinMode(SERVO_ENABLE_PIN, OUTPUT);
-    digitalWrite(SERVO_ENABLE_PIN, LOW);
+    
 
     Serial.printf("PWM driver is initialized now !\n");
   }
@@ -57,8 +65,10 @@ void SlowServo::begin()
  */
 void SlowServo::update()
 {
-  uint32_t dc_on = map(_pin, 0, 15, 0, 4095);
-  uint32_t dc_off = (dc_on + getDutyCycle()) % 4095;
+  _last_duty_cycle = getDutyCycle();
+  // servo pulses are out of phase, so that (hopefully) all servos don't cause a current inrush at the same time 
+  uint32_t dc_on = map(_pin, 0, 15, 0, 4095); // offset at pulse start
+  uint32_t dc_off = (dc_on + _last_duty_cycle) % 4095; // offset + duration (duty cycle)
   pwm_driver.setPWM(_pin, dc_on, dc_off);
 }
 
@@ -97,10 +107,10 @@ uint32_t SlowServo::getDutyCycle()
   else 
   {
     // moving...
-    float alpha = (1.0f * now_ms - _start_ms) / (_end_ms - _start_ms);
-    alpha = constrain(alpha, 0.0f, 1.0f);
-    return alpha * _end_duty_cycle + (1 - alpha) * _start_duty_cycle;
-    //map(1.0f * now_ms, _start_ms, _end_ms, _start_duty_cycle, _end_duty_cycle);
+    //float alpha = (1.0f * now_ms - _start_ms) / (_end_ms - _start_ms);
+    //alpha = constrain(alpha, 0.0f, 1.0f);
+    //return alpha * _end_duty_cycle + (1 - alpha) * _start_duty_cycle;
+    return map(1.0f * now_ms, _start_ms, _end_ms, _start_duty_cycle, _end_duty_cycle);
   }
 }
 
@@ -127,10 +137,10 @@ void SlowServo::moveTo(int deg)
     // commanded position is same as already set: do not change timing
     return;
   }
-  uint32_t move_duration_ms = abs(deg - getPos()) * _ms_per_deg;
+  uint32_t move_duration_ms = abs(deg - degFromDutyCycle(_last_duty_cycle)) * _ms_per_deg;
   _start_ms = millis();
-  _start_duty_cycle = getDutyCycle();
-  _end_duty_cycle = dutyCycleFromDeg(deg);
+  _start_duty_cycle = _last_duty_cycle; // start interpolation from last updated position
+  _end_duty_cycle = duty_cycle;
   _end_ms = _start_ms + move_duration_ms;
 }
  
@@ -147,6 +157,12 @@ void SlowServo::blockingMoveTo(int deg)
   }
 }
 
+void SlowServo::stop()
+{
+  _end_ms = millis();
+  _end_duty_cycle = _last_duty_cycle;
+}
+
 int32_t SlowServo::degFromDutyCycle(uint32_t duty_cycle)
 {
   return map(duty_cycle, _min_duty_cycle, _max_duty_cycle, _min_deg, _max_deg);
@@ -157,77 +173,12 @@ uint32_t SlowServo::dutyCycleFromDeg(int32_t deg)
   return map(deg, _min_deg, _max_deg, _min_duty_cycle, _max_duty_cycle);
 }
 
-
-/*
-  void begin();
-  void update();
-  void moveTo(int deg, float speedDps = 9999);
-  void blockingMoveTo(int deg, float speedDps = 9999);
-
-  static void outputEnable();
-  static void outputDisable();
-  static int dutyCycleFromDeg(int deg);
-  static int degFromDutyCycle(int duty_cycle);
-
-private:
-  uint8_t _pin;
-  float _speed_dps;
-  const int _min_deg;
-  const int _max_deg;
-  const int _min_duty_cycle;
-  const int _max_duty_cycle;
-};
-
-
-const int32_t min_deg = -90;
-const int32_t max_deg = 90;
-
-const uint32_t min_duty_cycle = 4096 * 5 / 100;
-const uint32_t max_duty_cycle = 4096 * 10 / 100;
-
-
-void servo_begin()
+void SlowServo::outputEnable()
 {
-  Wire.begin();
-  Wire.setClock(100 * 1000);
-  pwm.begin();
-  pwm.setPWMFreq(50); 
-
-  for (int i = 0; i < 15; ++i)
-  {
-    servo_move(i, 0);
-  }
-}
-
-uint32_t duty_cycle_from_degree(int32_t deg)
-{
-  return map(constrain(deg, min_deg, max_deg), 
-      min_deg, max_deg, min_duty_cycle, max_duty_cycle);
-}
-
-int32_t degree_from_duty_cycle(uint32_t duty_cycle)
-{
-  return map(constrain(duty_cycle, min_duty_cycle, max_duty_cycle),
-      min_duty_cycle, max_duty_cycle, min_deg, max_deg);
-}
-
-void servo_move(int pin, int angle)
-{
-  uint32_t t_on = 0; //4096 * pin / 16;
-  uint32_t t_off = (t_on + duty_cycle_from_degree(angle)) & 0x0FFF;
-  pwm.setPWM(pin, t_on, t_off);
-}
-
-
-void servo_output_enable()
-{
-  pinMode(SERVO_ENABLE_PIN, OUTPUT);
   digitalWrite(SERVO_ENABLE_PIN, LOW);
 }
 
-void servo_output_disable()
+void SlowServo::outputDisable()
 {
-  pinMode(SERVO_ENABLE_PIN, OUTPUT);
   digitalWrite(SERVO_ENABLE_PIN, HIGH);
 }
-*/

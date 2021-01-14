@@ -19,8 +19,8 @@
  *    3% - 12% => 123 to 491
  * 
  */
-#ifndef PCA9685_SERVO
-#define PCA9685_SERVO
+#ifndef PCA9685_SERVO_H
+#define PCA9685_SERVO_H
 
 #include <Arduino.h>
 #include <Adafruit_PWMServoDriver.h>
@@ -49,6 +49,7 @@ public:
   void update();
   void moveTo(int deg);
   void blockingMoveTo(int deg);
+  void stop();
   int getStatus();
 
   uint32_t getDutyCycle();
@@ -60,6 +61,9 @@ public:
   uint32_t dutyCycleFromDeg(int32_t deg);
   int32_t degFromDutyCycle(uint32_t duty_cycle);
 
+  static void outputEnable();
+  static void outputDisable();
+
 private:
   uint8_t _pin;
   float _ms_per_deg;
@@ -70,6 +74,7 @@ private:
 
   uint32_t _start_duty_cycle;
   uint32_t _end_duty_cycle;
+  uint32_t _last_duty_cycle; 
   uint32_t _start_ms;
   uint32_t _end_ms;
 
