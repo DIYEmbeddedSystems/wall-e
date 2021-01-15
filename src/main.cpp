@@ -26,6 +26,7 @@
 
 /* ~~~~~  Project-local dependencies */
 #include <credentials.h>        /* Wifi access point credentials, IP configuration macros */
+#include "trigger.h"            /* Utility for periodic tasks */
 
 #include <ArduinoLogger.h>      /* Logging library */
 #include <SerialLogger.h>       /* Log to Serial */
@@ -45,10 +46,13 @@
 #include "images.h"
 
 /* Servos */
-#include <pca9685_servo.h>
+#include "pca9685_servo.h"
 
 /* Motors */
-#include <MotorShield.h>
+#include "MotorShield.h"
+
+/* GY-80 IMU (Inertial measurement unit) */
+#include "GY-80.h"
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function declarations / prototypes
@@ -60,6 +64,7 @@ void heartBeat();
 void actuatorsLoop();
 void reportState();
 void safetyCheck();
+void updateAhrs();
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Global variables & object instances
@@ -103,6 +108,9 @@ Motor motors[] =
 /* Remember last 'move' command */
 int32_t move_command[2] = {0};
 
+/* Remember attitude & orientaion (yaw/pitch/roll) */
+float attitude[3] = {0.0f, 0.0f, 0.0f};
+
 /* last message from remote controller page */
 char userMessage[128] = "(user message)";
 
@@ -121,6 +129,8 @@ uint32_t lastCommandMs = 0;
 void setup()
 {
   ledOff();
+  SlowServo::outputDisable();
+
   Serial.begin(115200);
   while (!Serial) continue;
 //  gdbstub_init();
@@ -187,9 +197,7 @@ void setup()
   {
     servos[i].begin();
     servos[i].moveTo(0);
-    delay(0);
   }
-  SlowServo::outputDisable();
   logger.info("Servos are up");
 
   /* Setup motors */
@@ -231,6 +239,8 @@ void loop()
 
   uint32_t t5 = micros();
 
+  updateAhrs();
+
   if ((t5 - t0) > 10000) 
   {
     logger.info("Loop %lu µs: heartbeat %lu, WS %lu, act %lu, report %lu, safetyCheck %lu", 
@@ -246,15 +256,17 @@ void heartBeat()
   static uint32_t nextMs = 0;
   const uint32_t periodMs = 1000;
 
-  ledBlink(10, 990);
-
-  if ((int32_t)(millis() - nextMs) >= 0)
+  if (wsServer.count() > 0)
   {
-    while ((int32_t)(millis() - nextMs) >= 0)
-    {
-      nextMs += periodMs;
-    }
+    ledBlink(10, 490);
+  }
+  else
+  {
+    ledBlink(10,990);
+  }
   
+  if (periodicTrigger(&nextMs, periodMs, false))
+  {  
     char msg[256];
     snprintf(msg, sizeof(msg), "At %3u: %u clients, %ukB free. %s                                          ",
         (unsigned int)millis()/1000, wsServer.count(), (unsigned int)(ESP.getFreeHeap()/1024), userMessage);
@@ -278,13 +290,8 @@ void actuatorsLoop()
   static uint32_t nextMs = 5;
   const uint32_t periodMs = 10;
 
-  if (1) //(int32_t)(millis() - nextMs) >= 0)
+  if (periodicTrigger(&nextMs, periodMs, false))
   {
-    while ((int32_t)(millis() - nextMs) >= 0)
-    {
-      nextMs += periodMs;
-    }
-
     for (int i = 0; i < NUM_SERVOS; i++)
     {
       servos[i].update();
@@ -302,19 +309,15 @@ void reportState()
 
   char msg[256];
 
-  if ((int32_t)(millis() - nextMs) >= 0)
+  if (periodicTrigger(&nextMs, periodMs, false))
   {
-    while ((int32_t)(millis() - nextMs) >= 0)
-    {
-      nextMs += periodMs;
-    }
-
     // Build up JSON representation of current state
-    snprintf(msg, sizeof(msg), "{\"ms\":%lu,\"servos\":[%d,%d,%d,%d,%d,%d,%d,%d],\"move\":[%d,%d]}",
+    snprintf(msg, sizeof(msg), "{\"ms\":%lu,\"servos\":[%d,%d,%d,%d,%d,%d,%d,%d],\"move\":[%d,%d],\"attitude\":[%3.2f,%3.2f,%3.2f]}",
         millis(), 
         servos[0].getPos(), servos[1].getPos(), servos[2].getPos(), servos[3].getPos(), 
         servos[4].getPos(), servos[5].getPos(), servos[6].getPos(), servos[7].getPos(),
-        move_command[0], move_command[1]);
+        move_command[0], move_command[1], 
+        attitude[0], attitude[1], attitude[2]);
     
     // Send to all connected clients
     wsServer.textAll(msg);
@@ -328,25 +331,90 @@ void reportState()
 void safetyCheck()
 {
   static uint32_t nextMs = 7;
-  const uint32_t periodMs = 500;  
+  const uint32_t periodMs = 500;
+  static bool isSafe = false;
 
-  if ((int32_t)(millis() - nextMs) >= 0)
+  if (periodicTrigger(&nextMs, periodMs, false))
   {
-    nextMs += periodMs;
-
-    if ((int32_t)(millis() - lastCommandMs - 1000) >= 0)
+    if (isSafe)
     {
-      // No communication for 1 second --> stop all moves!
-      motors[0].setSpeed(0);
-      motors[1].setSpeed(0);
-
-      SlowServo::outputDisable();
-      for (int i = 0; i < NUM_SERVOS; i++)
+      // System was safe. Is it still?
+      if ((int32_t)(millis() - lastCommandMs - 1000) >= 0)
       {
-        servos[i].stop();
+        // No communication for 1 second --> switch to failsafe
+        isSafe = false;
+
+        motors[0].setSpeed(0);
+        motors[1].setSpeed(0);
+
+        SlowServo::outputDisable();
+        for (int i = 0; i < NUM_SERVOS; i++)
+        {
+          servos[i].stop();
+        }
+        logger.warn("No active communication: stopped");
       }
-      
-      logger.warn("STOP IT! Communication timed out!");
+    }
+    else
+    {
+      // System was in failsafe. Can we switch back to safe?
+      if ((int32_t)(millis() - lastCommandMs - 1000) < 0)
+      {
+        // A command was received during last second: OK.
+        isSafe = true;
+        SlowServo::outputEnable();
+      }
+    }
+  }
+}
+
+
+void updateAhrs()
+{
+  static uint32_t updateNextMs = 0;
+  const uint32_t updatePeriodMs = 100;
+
+  static uint32_t outputNextMs = 0;
+  const uint32_t outputPeriodMs = 1000;
+
+  static bool imuReady = false;
+  static float q[4] = {1.0f, 0.0f, 0.0f, 0.0f};
+
+  if (periodicTrigger(&updateNextMs, updatePeriodMs, false))
+  {
+    if (imuReady)
+    {
+      updateGY80();
+      MadgwickQuaternionUpdate(ax, ay, az, gx*PI/180.0f, gy*PI/180.0f, gz*PI/180.0f,  mx,  my,  mz, q);
+    }
+  }
+
+  if (periodicTrigger(&outputNextMs, outputPeriodMs, false))
+  {
+    if (!imuReady)
+    {
+      imuReady = initGY80();
+    }
+    else
+    {
+      float roll, pitch, yaw;
+      yaw   = atan2(2.0f * (q[1] * q[2] + q[0] * q[3]), q[0] * q[0] + q[1] * q[1] - q[2] * q[2] - q[3] * q[3]);   
+      pitch = -asin(2.0f * (q[1] * q[3] - q[0] * q[2]));
+      roll  = atan2(2.0f * (q[0] * q[1] + q[2] * q[3]), q[0] * q[0] - q[1] * q[1] - q[2] * q[2] + q[3] * q[3]);
+      pitch *= 180.0f / PI;
+      yaw   *= 180.0f / PI; 
+      roll  *= 180.0f / PI;
+
+      attitude[0] = yaw;
+      attitude[1] = pitch;
+      attitude[2] = roll;
+
+      char msg[256];
+      snprintf(msg, sizeof(msg), 
+          "{\"ms\":%ld,\"yaw\":%3.2f,\"pitch\":%3.2f,\"roll\":%3.2f}",
+          millis(), yaw, pitch, roll);
+      logger.info(msg);
+      wsServer.textAll(msg);
     }
   }
 }
@@ -375,7 +443,6 @@ void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * c
       pos = constrain(pos, -90, 90);
       servos[i].moveTo(pos);
     }
-    SlowServo::outputEnable();
     lastCommandMs = nowMs;
   }
 
@@ -384,8 +451,9 @@ void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * c
   {
     move_command[0] = constrain(motorArray[0].as<int>(), -100, 100); // forward / backward
     move_command[1] = constrain(motorArray[1].as<int>(), -100, 100); // left / right
-    int leftSpeed = constrain((move_command[0] + move_command[1])/2, -100, 100);
-    int rightSpeed = constrain((move_command[0] - move_command[1])/2, -100, 100);
+    float speedFactor = constrain(2. * fabs(move_command[0]) / 100., 0, 1);
+    int leftSpeed = constrain(speedFactor * (move_command[0] + move_command[1]), -100, 100);
+    int rightSpeed = constrain(speedFactor * (move_command[0] - move_command[1]), -100, 100);
     motors[0].setSpeed(leftSpeed);
     motors[1].setSpeed(-rightSpeed);
     lastCommandMs = nowMs;
