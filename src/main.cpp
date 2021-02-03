@@ -16,6 +16,7 @@
 // #include <GDBStub.h>            /* Enable debugging */
 #include <Esp.h>                /* Get infos about ESP reset, stack/heap, etc. */
 #include <ESP8266WiFi.h>        /* WiFi functions */
+#include <ESP8266mDNS.h>        /* multicast DNS responder */
 #include <ESPAsyncTCP.h>        /* Asynchronous web and websocket servers  */
 #include <ESPAsyncWebServer.h>
 #include <AsyncWebSocket.h>
@@ -50,6 +51,7 @@
 
 /* Motors */
 #include "MotorShield.h"
+/* Note: motor shield should be programmed, see: https://hackaday.io/project/162981-wemos-motor-shield-firmware-for-steppers-i2c */
 
 /* GY-80 IMU (Inertial measurement unit) */
 #include "GY-80.h"
@@ -86,12 +88,12 @@ Adafruit_SSD1306 oledDisplay(0);
 SlowServo servos[] = 
 {
   SlowServo( 8, 180.0),  /* head up/down */
-  SlowServo( 9, 90.0),  /* head left/right */
-  SlowServo(10, 60.0),  /* left arm up/down */
-  SlowServo(11, 60.0),  /* left arm left/right */
+  SlowServo( 9, 180.0),  /* head left/right */
+  SlowServo(10, 120.0),  /* left arm up/down */
+  SlowServo(11, 120.0),  /* left arm left/right */
   SlowServo(12, 300.0),  /* left hand open/close */
-  SlowServo(13, 60.0),  /* right arm up/down */
-  SlowServo(14, 60.0),  /* right arm left/right */
+  SlowServo(13, 120.0),  /* right arm up/down */
+  SlowServo(14, 120.0),  /* right arm left/right */
   SlowServo(15, 300.0)   /* right hand open/close */
 };
 #define NUM_SERVOS ((int)(sizeof(servos) / sizeof(servos[0])))
@@ -103,7 +105,6 @@ Motor motors[] =
   Motor(0x30, Motor::motor_b)
 };
 #define NUM_MOTORS ((int)(sizeof(motors)/sizeof(motors[0])))
-/* Note: motor shield should be programmed, see: https://hackaday.io/project/162981-wemos-motor-shield-firmware-for-steppers-i2c */
 
 /* Remember last 'move' command */
 int32_t move_command[2] = {0};
@@ -116,6 +117,9 @@ char userMessage[128] = "(user message)";
 
 /* Last time we have received a proper command */
 uint32_t lastCommandMs = 0;
+
+/* Am I being updated right now? (i.e. stop other communications) */
+bool updating = false;
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Function implementation
@@ -171,12 +175,19 @@ void setup()
     delay(10);
   }
 
+  logger.info("\n\n");
   logger.info("Application " __FILE__ " compiled " BUILD_DATE);
   logger.info(BUILD_DETAILS);
   logger.info("Reset reason: %s", ESP.getResetReason().c_str());
   logger.info("Reset info: %s", ESP.getResetInfo().c_str());
-
   logger.info("Wifi is up. I'm %s", WiFi.localIP().toString().c_str());
+
+  /* Start up multicast DNS */
+  if (!MDNS.begin("walle"))
+  { 
+    logger.warn("Could not start MDNS");
+  }
+  MDNS.addService("http", "tcp", 80);
 
   /* Start up file system */
   LittleFS.begin();
@@ -217,34 +228,35 @@ void setup()
  */
 void loop()
 {
-  uint32_t t0 = micros();
-
-  heartBeat();
-
-  uint32_t t1 = micros();
-
-  webSocketServerLoop();
-
-  uint32_t t2 = micros();
-
-  actuatorsLoop();
-
-  uint32_t t3 = micros();
-
-  reportState();
-
-  uint32_t t4 = micros();
-
-  safetyCheck();
-
-  uint32_t t5 = micros();
-
-  updateAhrs();
-
-  if ((t5 - t0) > 10000) 
+  if (updating)
   {
-    logger.info("Loop %lu µs: heartbeat %lu, WS %lu, act %lu, report %lu, safetyCheck %lu", 
-      t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4);
+    ledBlink(10, 190);
+
+    static uint32_t nextMs = 0;
+    if (periodicTrigger(&nextMs, 1000))
+    {
+      Serial.printf("Web update ongoing...");
+    }
+  }
+  else
+  {
+    uint32_t t0 = micros();
+    heartBeat();
+    uint32_t t1 = micros();
+    webSocketServerLoop();
+    uint32_t t2 = micros();
+    actuatorsLoop();
+    uint32_t t3 = micros();
+    reportState();
+    uint32_t t4 = micros();
+    safetyCheck();
+    uint32_t t5 = micros();
+    updateAhrs();
+    if ((t5 - t0) > 10000) 
+    {
+      logger.info("Loop %lu µs: heartbeat %lu, WS %lu, act %lu, report %lu, safetyCheck %lu", 
+        t4 - t0, t1 - t0, t2 - t1, t3 - t2, t4 - t3, t5 - t4);
+    }
   }
 }
 
@@ -265,7 +277,7 @@ void heartBeat()
     ledBlink(10,990);
   }
   
-  if (periodicTrigger(&nextMs, periodMs, false))
+  if (periodicTrigger(&nextMs, periodMs))
   {  
     char msg[256];
     snprintf(msg, sizeof(msg), "At %3u: %u clients, %ukB free. %s                                          ",
@@ -290,7 +302,7 @@ void actuatorsLoop()
   static uint32_t nextMs = 5;
   const uint32_t periodMs = 10;
 
-  if (periodicTrigger(&nextMs, periodMs, false))
+  if (periodicTrigger(&nextMs, periodMs))
   {
     for (int i = 0; i < NUM_SERVOS; i++)
     {
@@ -309,7 +321,7 @@ void reportState()
 
   char msg[256];
 
-  if (periodicTrigger(&nextMs, periodMs, false))
+  if (periodicTrigger(&nextMs, periodMs))
   {
     // Build up JSON representation of current state
     snprintf(msg, sizeof(msg), "{\"ms\":%lu,\"servos\":[%d,%d,%d,%d,%d,%d,%d,%d],\"move\":[%d,%d],\"attitude\":[%3.2f,%3.2f,%3.2f]}",
@@ -334,7 +346,7 @@ void safetyCheck()
   const uint32_t periodMs = 500;
   static bool isSafe = false;
 
-  if (periodicTrigger(&nextMs, periodMs, false))
+  if (periodicTrigger(&nextMs, periodMs))
   {
     if (isSafe)
     {
@@ -371,8 +383,11 @@ void safetyCheck()
 
 void updateAhrs()
 {
+  static uint32_t checkSensorMs = 0;
+  const uint32_t checkSensorPeriodMs = 15000;
+
   static uint32_t updateNextMs = 0;
-  const uint32_t updatePeriodMs = 100;
+  const uint32_t updatePeriodMs = 10;
 
   static uint32_t outputNextMs = 0;
   const uint32_t outputPeriodMs = 1000;
@@ -380,42 +395,37 @@ void updateAhrs()
   static bool imuReady = false;
   static float q[4] = {1.0f, 0.0f, 0.0f, 0.0f};
 
-  if (periodicTrigger(&updateNextMs, updatePeriodMs, false))
+  if (periodicTrigger(&checkSensorMs, checkSensorPeriodMs))
   {
-    if (imuReady)
-    {
-      updateGY80();
-      MadgwickQuaternionUpdate(ax, ay, az, gx*PI/180.0f, gy*PI/180.0f, gz*PI/180.0f,  mx,  my,  mz, q);
-    }
+    imuReady = initGY80();
   }
 
-  if (periodicTrigger(&outputNextMs, outputPeriodMs, false))
+  if (periodicTrigger(&updateNextMs, updatePeriodMs) && imuReady)
   {
-    if (!imuReady)
-    {
-      imuReady = initGY80();
-    }
-    else
-    {
-      float roll, pitch, yaw;
-      yaw   = atan2(2.0f * (q[1] * q[2] + q[0] * q[3]), q[0] * q[0] + q[1] * q[1] - q[2] * q[2] - q[3] * q[3]);   
-      pitch = -asin(2.0f * (q[1] * q[3] - q[0] * q[2]));
-      roll  = atan2(2.0f * (q[0] * q[1] + q[2] * q[3]), q[0] * q[0] - q[1] * q[1] - q[2] * q[2] + q[3] * q[3]);
-      pitch *= 180.0f / PI;
-      yaw   *= 180.0f / PI; 
-      roll  *= 180.0f / PI;
+    updateGY80();
+    MadgwickQuaternionUpdate(ax, ay, az, gx*PI/180.0f, gy*PI/180.0f, gz*PI/180.0f,  mx,  my,  mz, q);
+  }
 
-      attitude[0] = yaw;
-      attitude[1] = pitch;
-      attitude[2] = roll;
+  if (periodicTrigger(&outputNextMs, outputPeriodMs) && imuReady)
+  {
+    float roll, pitch, yaw;
+    yaw   = atan2(2.0f * (q[1] * q[2] + q[0] * q[3]), q[0] * q[0] + q[1] * q[1] - q[2] * q[2] - q[3] * q[3]);   
+    pitch = -asin(2.0f * (q[1] * q[3] - q[0] * q[2]));
+    roll  = atan2(2.0f * (q[0] * q[1] + q[2] * q[3]), q[0] * q[0] - q[1] * q[1] - q[2] * q[2] + q[3] * q[3]);
+    pitch *= 180.0f / PI;
+    yaw   *= 180.0f / PI; 
+    roll  *= 180.0f / PI;
 
-      char msg[256];
-      snprintf(msg, sizeof(msg), 
-          "{\"ms\":%ld,\"yaw\":%3.2f,\"pitch\":%3.2f,\"roll\":%3.2f}",
-          millis(), yaw, pitch, roll);
-      logger.info(msg);
-      wsServer.textAll(msg);
-    }
+    attitude[0] = yaw;
+    attitude[1] = pitch;
+    attitude[2] = roll;
+
+    char msg[256];
+    snprintf(msg, sizeof(msg), 
+        "{\"ms\":%ld,\"yaw\":%3.2f,\"pitch\":%3.2f,\"roll\":%3.2f}",
+        millis(), yaw, pitch, roll);
+    logger.info(msg);
+    wsServer.textAll(msg);
   }
 }
 

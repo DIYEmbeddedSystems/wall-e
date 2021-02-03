@@ -19,8 +19,12 @@
 #include "version.h"
 
 extern DupLogger logger;        /* logger to be used (defined in main) */
+extern bool updating;
+
 
 AsyncWebServer httpServer(80);  /* HTTP server instance */
+
+void ota_update_progress(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
 
 /**
  * @brief Configure a web server
@@ -28,15 +32,22 @@ AsyncWebServer httpServer(80);  /* HTTP server instance */
 void webServerSetup()
 {
   /* Configure HTTP server handlers */
+  /* Serve any file stored in flash filesystem */
   httpServer.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
   httpServer.on("/list", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send(200, "application/json", filesJSON());
-  });  
+    });  
  
   httpServer.on("/version", HTTP_GET, [](AsyncWebServerRequest *request) {
       request->send(200, "application/json", versionJSON());
-  });
+    });
+
+  httpServer.on("/fw_ota", HTTP_POST, [](AsyncWebServerRequest *request){
+      logger.warn("Firmware OTA update started !");
+      updating = true;
+      request->send(200);
+    }, ota_update_progress);
 
   httpServer.onNotFound([](AsyncWebServerRequest *request) {
       logger.info("http: %s %s%s not found", 
@@ -44,10 +55,61 @@ void webServerSetup()
           request->host().c_str(),
           request->url().c_str());
       request->send(404, "text/plain", "404: Not Found");
-  });
+    });
 
   httpServer.begin();
 }
+
+
+/**
+ * @brief Callback for firmware upload request
+ */
+void ota_update_progress(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+{
+  uint32_t free_space = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+  if (!index)
+  {
+    logger.info("Update ! Free space %u B", free_space);
+    Update.runAsync(true);
+    if (!Update.begin(free_space)) 
+    {
+      Update.printError(Serial);
+      logger.error("Update: not enough space");
+      updating = false;
+    }
+  }
+
+  if (Update.write(data, len) != len) 
+  {
+    Update.printError(Serial);
+    logger.error("Update: write error");
+    updating = false;
+  }
+  else
+  {
+    logger.info("Progress: %d%%\n", (Update.progress()*100)/Update.size());
+    updating = true;
+  }
+
+  if (final) 
+  {
+    if (!Update.end(true))
+    {
+      Update.printError(Serial);
+      logger.error("Update: end failed");
+      updating = false;
+    } 
+    else
+     {
+      Serial.println("Update complete");
+      logger.error("Restarting. Bye !");
+      updating = false;
+      delay(1000);
+      ESP.restart();
+    }
+  }
+}
+
 
 /**
  * @brief Describe filesystem in JSON format

@@ -8,4 +8,4 @@
 
 #include <Arduino.h>
 
-bool periodicTrigger(uint32_t *pTriggerNextMs, const uint32_t triggerPeriodMs, bool retrigger);
+uint8_t periodicTrigger(uint32_t *pTriggerNextMs, const uint32_t triggerPeriodMs);
