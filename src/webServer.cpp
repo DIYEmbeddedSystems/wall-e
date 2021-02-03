@@ -24,7 +24,9 @@ extern bool updating;
 
 AsyncWebServer httpServer(80);  /* HTTP server instance */
 
-void ota_update_progress(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+void fw_upload_progress(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+void file_upload_progress(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final);
+
 
 /**
  * @brief Configure a web server
@@ -32,24 +34,103 @@ void ota_update_progress(AsyncWebServerRequest *request, String filename, size_t
 void webServerSetup()
 {
   /* Configure HTTP server handlers */
-  /* Serve any file stored in flash filesystem */
+
+  /* Serve files stored in LittleFS flash filesystem */
   httpServer.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
 
-  httpServer.on("/list", HTTP_GET, [](AsyncWebServerRequest *request) {
+  /* Serve JSON apis */
+  httpServer.on("/list", HTTP_GET, [](AsyncWebServerRequest *request) 
+    {
       request->send(200, "application/json", filesJSON());
     });  
  
-  httpServer.on("/version", HTTP_GET, [](AsyncWebServerRequest *request) {
+  httpServer.on("/version", HTTP_GET, [](AsyncWebServerRequest *request) 
+    {
       request->send(200, "application/json", versionJSON());
     });
 
-  httpServer.on("/fw_ota", HTTP_POST, [](AsyncWebServerRequest *request){
-      logger.warn("Firmware OTA update started !");
-      updating = true;
-      request->send(200);
-    }, ota_update_progress);
+  httpServer.on("/heap", HTTP_GET, [](AsyncWebServerRequest *request)
+    {
+      char msg[256];
+      snprintf(msg, sizeof(msg), "{\"heap\":%u}", ESP.getFreeHeap());
+      request->send(200, "application/json", msg);
+    });
 
-  httpServer.onNotFound([](AsyncWebServerRequest *request) {
+
+  httpServer.on("/erase", HTTP_ANY, [](AsyncWebServerRequest *request)
+    {
+       if(request->hasParam("path"))
+       {
+        String path = request->getParam("path")->value();
+        if (LittleFS.exists(path))
+        {
+          logger.warn("Removing file `%s`", path.c_str());
+          LittleFS.remove(path);
+          request->send(200, "text/plain", "Removed");
+        }
+        else
+        {
+          logger.warn("File `%s` not found", path.c_str());
+          request->send(200, "text/plain", "Not found");
+        }
+       }
+       else
+       {
+         logger.warn("File erase: path not provided");
+         request->send(200, "text/plain", "Usage: erase?path=/example.txt");
+       }
+    });
+
+  /* Serve firmware update endpoint */
+  httpServer.on("/fw_ota", HTTP_POST, [](AsyncWebServerRequest *request)
+    {
+      if (!Update.hasError())
+      {
+        logger.warn("Firmware OTA update successful");
+        AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "OK");
+        response->addHeader("Connection", "close");
+        request->send(response);
+        delay(5000);
+        ESP.restart();
+      }
+      else
+      {
+        logger.warn("Firmware OTA update successful");
+        AsyncWebServerResponse *response = request->beginResponse(200, "text/plain", "FW update failed");
+        request->send(response);
+      }
+      
+      updating = true;
+      request->send(200, "text/plain", "update finished");
+    }, fw_upload_progress);
+
+  /* Serve file update endpoint */
+  httpServer.onFileUpload([](AsyncWebServerRequest *request, const String& filename, size_t index, uint8_t *data, size_t len, bool final)
+    {
+      if(!index) 
+      {
+        logger.warn("UploadStart: %s", filename.c_str());
+        request->_tempFile = LittleFS.open(filename, "w");
+      }
+
+      if (len && request->_tempFile)
+      {
+        request->_tempFile.write(data,len);
+      }
+
+      if(final)
+      {
+        if (request->_tempFile)
+        {
+          request->_tempFile.close();
+        }
+        logger.warn("UploadEnd: %s (%s)\n", filename.c_str(), getSizeFormat(index+len));
+        request->send(200, "text/plain", "Upload complete");
+      }
+    });
+
+  httpServer.onNotFound([](AsyncWebServerRequest *request) 
+    {
       logger.info("http: %s %s%s not found", 
           (request->method() == HTTP_GET) ? "GET" : (request->method() == HTTP_POST) ? "POST" : "METHOD?",
           request->host().c_str(),
@@ -64,30 +145,38 @@ void webServerSetup()
 /**
  * @brief Callback for firmware upload request
  */
-void ota_update_progress(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
+void fw_upload_progress(AsyncWebServerRequest *request, String filename, size_t index, uint8_t *data, size_t len, bool final)
 {
+  static uint32_t reportedProgress = 0;
   uint32_t free_space = (ESP.getFreeSketchSpace() - 0x1000) & 0xFFFFF000;
+
   if (!index)
   {
-    logger.info("Update ! Free space %u B", free_space);
+    logger.info("FW upload ! Filename %s, Free space %u B", filename.c_str(), free_space);
     Update.runAsync(true);
     if (!Update.begin(free_space)) 
     {
       Update.printError(Serial);
-      logger.error("Update: not enough space");
+      logger.error("FW upload: not enough space");
       updating = false;
     }
+    reportedProgress = 0;
   }
 
   if (Update.write(data, len) != len) 
   {
     Update.printError(Serial);
-    logger.error("Update: write error");
+    logger.error("FW upload write error");
     updating = false;
   }
   else
   {
-    logger.info("Progress: %d%%\n", (Update.progress()*100)/Update.size());
+    uint32_t progress = (Update.progress()*100)/Update.size();
+    if (progress - reportedProgress >= 5)
+    {
+      logger.info("FW upload %d%%", progress);
+      reportedProgress = progress;
+    }
     updating = true;
   }
 
@@ -95,20 +184,29 @@ void ota_update_progress(AsyncWebServerRequest *request, String filename, size_t
   {
     if (!Update.end(true))
     {
+      int err = Update.getError();
       Update.printError(Serial);
-      logger.error("Update: end failed");
-      updating = false;
-    } 
-    else
-     {
-      Serial.println("Update complete");
-      logger.error("Restarting. Bye !");
-      updating = false;
-      delay(1000);
-      ESP.restart();
+      logger.error("FW upload failed");
+      logger.error("Error: %d, %s",
+        err,
+        (err == UPDATE_ERROR_WRITE) ? "write" :
+        (err == UPDATE_ERROR_ERASE) ? "erase" : 
+        (err == UPDATE_ERROR_SPACE) ? "space" :
+        (err == UPDATE_ERROR_SIZE) ? "size" :
+        (err == UPDATE_ERROR_MD5) ? "md5" : 
+        (err == UPDATE_ERROR_SIGN) ? "sign" :
+        (err == UPDATE_ERROR_FLASH_CONFIG) ? "flash_config" :
+        (err == UPDATE_ERROR_MAGIC_BYTE) ? "magic_byte" :
+        (err == UPDATE_ERROR_BOOTSTRAP) ? "bootstrap" :
+        "other"
+      );
     }
+    updating = false;
   }
 }
+
+
+
 
 
 /**

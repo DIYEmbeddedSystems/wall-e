@@ -4,6 +4,13 @@
  * @date 2021-01-08
  * @author DIY Embedded Systems (diy.embeddedsytems@gmail.com)
  * 
+ * 
+ * - Upload a new firmware image:
+ *     curl -v -F "image=@firmware.bin" ${IP}/update
+ *  - Upload all files in /data/ folder:
+*      for f in ./data/ * ; do curl -F "file=@$f" 192.168.1.167/upload ; done
+ * - List files on file system:
+ *    curl ${IP_ADDRESS}/list
  */
 
 #ifndef WEBSERVER_H__

@@ -183,11 +183,13 @@ void setup()
   logger.info("Wifi is up. I'm %s", WiFi.localIP().toString().c_str());
 
   /* Start up multicast DNS */
-  if (!MDNS.begin("walle"))
+  if (!MDNS.begin("wall-e"))
   { 
     logger.warn("Could not start MDNS");
   }
+
   MDNS.addService("http", "tcp", 80);
+  MDNS.addService("ws", "tcp", 81);
 
   /* Start up file system */
   LittleFS.begin();
@@ -230,7 +232,7 @@ void loop()
 {
   if (updating)
   {
-    ledBlink(10, 190);
+    ledBlink(150, 50);
 
     static uint32_t nextMs = 0;
     if (periodicTrigger(&nextMs, 1000))
