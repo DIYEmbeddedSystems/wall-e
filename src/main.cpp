@@ -67,6 +67,7 @@ void actuatorsLoop();
 void reportState();
 void safetyCheck();
 void updateAhrs();
+uint32_t i2c_check();
 
 /* ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     Global variables & object instances
@@ -77,6 +78,19 @@ void updateAhrs();
 WiFiUDP Udp;
 UdpLogger loggerUdp(Udp, IPAddress(192,168,1,105), 8888, "UDP", LOG_ALL);
 DupLogger logger(SerialLogger::getDefault(), loggerUdp); // log to both Serial and UDP
+
+/* I2C devices addresses 
+  Wemos Motor shield: 0x2F
+  SSD1306 OLED shield: 0x3C
+  PCA9685 PWM Servo shield: 0x40
+  GY-80 IMU: 
+  * HMC5883 magnetometer: 0x1E,
+  * ADXL345 3-axis accelerometer: 0x53
+  * L3G4200D - 3-axis Gyro: 0x69
+  * BMP085 Barometer & temperature: 0x77 
+*/
+static const uint8_t i2c_addresses[] = {0x2F, 0x3C, 0x40, 0x1E, 0x53, 0x69, 0x77};
+static const char *i2c_device_names[] = {"motor", "oled", "pwm", "mag", "accel", "gyro", "baro"};
 
 /* I2C OLED screen */
 Adafruit_SSD1306 oledDisplay(0);
@@ -149,10 +163,12 @@ void setup()
   /* Start up OLED display screen */
   Wire.begin();
   Wire.setClock(400 * 1000); // according to implementation, supports 1 kHz to 400 kHz clock frequency
+
   oledDisplay.setRotation(2);
   oledDisplay.clearDisplay();
   oledDisplay.begin(SSD1306_SWITCHCAPVCC, 0x3C);
-  oledDisplay.drawBitmap(0, 0, walle_splash, walle_splash_width, walle_splash_height, 1);
+  //oledDisplay.drawBitmap(0, 0, walle_splash, walle_splash_width, walle_splash_height, 1);
+  oledDisplay.drawBitmap(0, 0, splash_solar_charge, splash_solar_charge_width, splash_solar_charge_height, 1);
   oledDisplay.display();
   logger.info("Display is up");
 
@@ -187,14 +203,13 @@ void setup()
   { 
     logger.warn("Could not start MDNS");
   }
-
   MDNS.addService("http", "tcp", 80);
   MDNS.addService("ws", "tcp", 81);
+  // FIXIT: I could not test MDNS to actually respond to wall-e.local
 
   /* Start up file system */
   LittleFS.begin();
-  logger.info("File system is up:");
-  logger.info(filesJSON().c_str());
+  logger.info("File system is up. Files: %s", filesJSON().c_str());
 
   /* Start up webserver */
   webServerSetup();
@@ -221,6 +236,8 @@ void setup()
     delay(200);
     motors[i].setSpeed(0);
   }
+
+  i2c_check();
 
   logger.info("\n\nSetup done!\n\n");
 }
@@ -276,7 +293,7 @@ void heartBeat()
   }
   else
   {
-    ledBlink(10,990);
+    ledBlink(10, 990);
   }
   
   if (periodicTrigger(&nextMs, periodMs))
@@ -389,7 +406,7 @@ void updateAhrs()
   const uint32_t checkSensorPeriodMs = 15000;
 
   static uint32_t updateNextMs = 0;
-  const uint32_t updatePeriodMs = 10;
+  const uint32_t updatePeriodMs = 100;
 
   static uint32_t outputNextMs = 0;
   const uint32_t outputPeriodMs = 1000;
@@ -399,7 +416,10 @@ void updateAhrs()
 
   if (periodicTrigger(&checkSensorMs, checkSensorPeriodMs))
   {
-    imuReady = initGY80();
+    if (!imuReady)
+    {
+      imuReady = initGY80();
+    }
   }
 
   if (periodicTrigger(&updateNextMs, updatePeriodMs) && imuReady)
@@ -470,4 +490,28 @@ void webSocketJsonFrameHandler(AsyncWebSocket * server, AsyncWebSocketClient * c
     motors[1].setSpeed(-rightSpeed);
     lastCommandMs = nowMs;
   }
+}
+
+/**
+ * @brief Peek at all i2c devices that should be connected to the wemos
+ * @return 0 if all devices acknowledged, i-th bit set if i-th device fails
+ */
+uint32_t i2c_check()
+{
+  uint32_t res = 0;
+
+  for (uint32_t i = 0; i < sizeof(i2c_addresses)/sizeof(i2c_addresses[0]); i++)
+  {
+    // peek I2C address (do not send data), device should just ACK
+    Wire.beginTransmission(i2c_addresses[i]);
+    uint8_t error = Wire.endTransmission();
+
+    if (error != 0)
+    {
+      res |= (1 << i);
+    }
+    logger.info("I2C devices %s at %02x: %s", 
+        i2c_device_names[i], i2c_addresses[i], error ? "FAIL" : "OK");
+  }
+  return res;
 }

@@ -1,4 +1,4 @@
-#!/usr/bin/bash
+#!/bin/bash
 
 # This script uploads files to the ESP8266 server via the http upload service.
 IP=192.168.1.182

@@ -59,6 +59,7 @@ uint8_t Motor::i2cAnswer()
   while (Wire.available()) 
   {
     unsigned char c = Wire.read();
+    (void)c;
     ++res;
   }
   delay(10);

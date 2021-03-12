@@ -41,221 +41,69 @@
       background-color: #383;
     }
 
+    .btn.blue {
+      background-color: #338;
+    }
+
     .btn:hover {
       opacity: 1
     }
 
-    input[type=range] {
-      width: 95%;
-      height: 1.5 em;
-      -webkit-appearance: none;
-      background:  #ccc;
-      overflow: hidden;
-      outline: none;
-      display: block;
-      margin: auto;
-    }
-    input::-webkit-slider-thumb {
-      -webkit-appearance: none;
-      width: 1em;
-      height: 1em;
-      border-radius: 25%;
-      background: #068;
-    }
-
-    input[type=range].vertical {
-      -webkit-transform:rotate(270deg);       
-      -moz-transform:rotate(270deg);
-      -o-transform:rotate(270deg);
-      -ms-transform:rotate(270deg);
-      transform:rotate(270deg);
-      height: 95%;
-	  }
-
     table, th, tr {
       width: 100%;
-      border: 1px solid #ddd;
+      padding: 1px;
+      border: 0px solid #ddd;
       border-collapse: collapse;
       text-align: center;
     } 
-    tr:hover {
-      background-color: #7777;
-    }
-    </style>
+  </style>
   </head>
   <body>
-    <h3>Wall-E</h3>
+
+    <p>
+      <img height="140px" alt="Chest camera view" src="http://192.168.1.121/stream"></img>
+    </p>      
+    <!-- Connect to URL -->
     <table>
       <tr>
-        <td width="75%">
-          <textarea id="urlTxt" rows="1" cols="30">ws://192.168.1.182/ws</textarea>
-        </td>
         <td>
           <button class="btn green" id="connectBtn">Connect</button>  
+        </td>
+        <td>
+          <textarea id="urlTxt" rows="1" cols="35">ws://192.168.1.182/ws</textarea>
         </td>
       </tr>
     </table>
     
+    <!-- Joysticks -->
     <table>
       <tr>
-        <th colspan="2">
-          Input
-        </th>
-        <th>
-          Set pos
-        </th>
-        <th>
-          Pos
-        </th>
-      </tr>
-      <tr>
-        <td width="10%">
-          Move &varr; 
-        </td>
-        <td width="60%">
-          <input class="custom-slider" type="range" id="inputFwd" min="-100" max="100" value="0" oninput="inputChange()" onchange="stopMove()">
+        <td>
+          <canvas id="canvasNavJoystick"></canvas>
         </td>
         <td>
-          <span id="cmdFwd">0&percnt;</span>
-        </td>
-        <td>
-          <span id="feedbackFwd">0&percnt;</span>
-        </td>
-      </tr>
-      <tr>
-        <td>
-          &olarr;Turn&orarr;
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputTurn" min="-100" max="100" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdTurn">0&percnt;</span>
-        </td>
-        <td>
-          <span id="feedbackTurn">0&percnt;</span>
-        </td>
-      </tr>
-      <tr>
-        <td>
-          Head &varr;
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputHdUp" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdHdUp">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackHdUp">0&deg;</span>
-        </td>
-      </tr>
-      <tr>
-        <td>
-          &larr;Head&rarr;
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputHdLR" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdHdLR">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackHdLR">0&deg;</span>
-        </td>
-      </tr>
-
-      <tr>
-        <td>
-          Left arm &varr;
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputLAUp" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdLAUp">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackLAUp">0&deg;</span>
-        </td>
-      </tr>
-
-      <tr>
-        <td>
-          &larr;Left arm&rarr;
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputLALR" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdLALR">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackLALR">0&deg;</span>
-        </td>
-      </tr>
-
-      <tr>
-        <td>
-          Left hand
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputLH" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdLH">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackLH">0&deg;</span>
-        </td>
-      </tr>
-      
-      <tr>
-        <td>
-          Right arm &varr;
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputRAUp" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdRAUp">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackRAUp">0&deg;</span>
-        </td>
-      </tr>
-
-      <tr>
-        <td>
-          &larr;Right arm&rarr;
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputRALR" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdRALR">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackRALR">0&deg;</span>
-        </td>
-      </tr>
-
-      <tr>
-        <td>
-          Right hand
-        </td>
-        <td>
-          <input class="range horizontal" type="range" id="inputRH" min="-90" max="90" value="0" oninput="inputChange()">
-        </td>
-        <td>
-          <span id="cmdRH">0&deg;</span>
-        </td>
-        <td>
-          <span id="feedbackRH">0&deg;</span>
+          <canvas id="canvasHeadJoystick"></canvas>
         </td>
       </tr>
     </table>
-
+    <table>
+      <tr>
+        <td>
+          <canvas id="canvasLeftHandJoystick"></canvas>
+        </td>
+        <td>
+          <canvas id="canvasLeftArmJoystick"></canvas>
+        </td>
+        <td>
+          <canvas id="canvasRightArmJoystick"></canvas>
+        </td>
+        <td>
+          <canvas id="canvasRightHandJoystick"></canvas>
+        </td>
+      </tr>
+    </table>
+    
+    <!-- Attitude compass -->
     <table>
       <tr>
         <td rowspan="3">
@@ -295,13 +143,14 @@
       </tr>
     </table>
 
+    <!-- Debug: show current controller state, and latest robot state -->
     <table>
       <tr>
         <td width="25%">
           Controller state
         </td>  
         <td>
-          <textarea id="controllerStateTxt" rows="1" cols="50"></textarea><br/>
+            <span id="controllerStateSpan">lastest known robot state</span>
         </td>
       </tr>
       <tr>
@@ -309,15 +158,7 @@
           Robot State
         </td>
         <td>
-          <textarea id="robotStateTxt" rows="1" cols="50"></textarea>
-        </td>
-      </tr>
-      <tr>
-        <td>
-          <textarea id="msgTxt" placeholder="your message here" rows="1" cols="30"></textarea>
-        </td>
-        <td>
-          <button class="btn green" id="sendBtn">Send</button>
+          <span id="robotStateSpan">lastest known robot state</span>
         </td>
       </tr>
       <tr>
@@ -328,147 +169,5 @@
     </table>
     
   </body>
-
-  <script>
-
-var urlTxt = document.getElementById("urlTxt");
-var msgTxt = document.getElementById("msgTxt");
-var logTxt = document.getElementById("logTxt");
-
-var connectBtn = document.getElementById("connectBtn");
-var sendBtn = document.getElementById("sendBtn");
-
-var controllerStateTxt = document.getElementById("controllerStateTxt");
-var robotStateTxt = document.getElementById("robotStateTxt");
-
-var compassSvg = document.getElementById("compass");
-
-var degreesOfFreedom = [
-    "Fwd", "Turn",          /* Move: forward/backward and left/right */
-    "HdUp", "HdLR",         /* Head: up/down, left/right */
-    "LAUp", "LALR", "LH",   /* Left arm: up/down, left/right, hand open/close */
-    "RAUp", "RALR", "RH"    /* Right arm: up/down, left/right, hand open/close */
-];
-
-var attitudes = ["Yaw", "Pitch", "Roll"];
-
-var inputSlidersList = degreesOfFreedom.map(dofName => {return document.getElementById("input" + dofName)});
-var setposTextList = degreesOfFreedom.map(dofName => {return document.getElementById("cmd" + dofName)});
-var feedbackTextList = degreesOfFreedom.map(dofName => {return document.getElementById("feedback" + dofName)});
-
-var feedbackAttitudeList = attitudes.map(attName => {return document.getElementById("feedback" + attName)});
-
-var socket = undefined;
-
-var controllerState = {move:[0,0],servos:[0,0,0,0]};
-var robotState = {move:[0,0],servos:[0,0,0,0]};
-
-function log(msg) {
-  var now = new Date();
-  var timestamp = ("00" + now.getHours()).slice(-2) + ':'
-      + ("00" + now.getMinutes()).slice(-2) + ':'
-      + ("00" + now.getSeconds()).slice(-2) + '.' 
-      + ("000" + now.getMilliseconds()).slice(-3);
-  
-      // print on console
-  console.log(msg);
-  // Append to log textarea
-  logTxt.value += "\n" + "[" + timestamp + "]" + msg;
-  // Scroll to bottom
-  logTxt.scrollTop = logTxt.scrollHeight;
-}
-
-function inputChange() {
-  // When a range slider is moved: update controller state
-  controllerState.move = inputSlidersList.slice(0, 2).map(slider => {return parseInt(slider.value);});
-  controllerState.servos = inputSlidersList.slice(2, 10).map(slider => {return parseInt(slider.value);});
-  controllerStateTxt.value = JSON.stringify(controllerState);
-
-  for (var i = 0; i < 2; i++) {
-    setposTextList[i].innerHTML = controllerState.move[i] + "&percnt;";
-  }
-  for (var i = 0; i < 8; i++) {
-    setposTextList[2 + i].innerHTML = controllerState.servos[i] + "&deg;";
-  }  
-}
-
-function stopMove() {
-  // when the "Move forward/backward" slider is released, set it back to 0 position
-  inputSlidersList[0].value = "0";
-  inputChange();
-}
-
-function handleMessage(msg) {
-  log("          <- " + msg);
-  if (msg[0] == '{') {
-    // msg contains JSON formatted data
-    robotState = JSON.parse(msg);
-    robotStateTxt.value = JSON.stringify(robotState);
-    for (var i = 0; i < 2; i++) {
-      feedbackTextList[i].innerHTML = robotState.move[i] + "&percnt;";
-    }
-    for (var i = 0; i < 8; i++) {
-      feedbackTextList[2 + i].innerHTML = robotState.servos[i] + "&deg;";
-    }
-    if (robotState.attitude != undefined) {
-      for (var i = 0; i < 3; i++) {
-        feedbackAttitudeList[i].innerHTML = robotState.attitude[i] + "&deg;";
-      }
-      compassSvg.setAttribute('transform', 'rotate(' + robotState.attitude[0] + ')');
-    }
-  }
-  socket.send(JSON.stringify(controllerState));
-}
-
-function send(msg) {
-  if (socket == undefined)
-  {
-    log("! Not connected");
-  }
-  else
-  {
-    log("-> " + msg);
-    socket.send(msg);
-  }
-}
-
-connectBtn.onclick = function(evt) {
-  var url = urlTxt.value;
-  if (socket != undefined) {
-    log("! Closing websocket");
-    socket.close();
-  }
-  else
-  {
-    log("! Attempting to connect to " + url);
-    socket = new WebSocket(url);
-
-    socket.onmessage = function(evt) {
-      handleMessage(evt.data);
-    }
-
-    socket.onclose = function(evt) {
-      log("! Socket closed");
-      socket = undefined;
-      connectBtn.innerHTML = "Connect";
-      connectBtn.classList.remove("red");
-      connectBtn.classList.add("green");
-    }
-
-    socket.onerror = function(evt) {
-      log("! Socket error" + JSON.stringify(evt));
-      socket.close();
-    }
-
-    connectBtn.innerHTML = "Disconnect";
-    connectBtn.classList.add("red");
-    connectBtn.classList.remove("green");
-  }
-}
-
-sendBtn.onclick = function(evt) {
-  var msg = msgTxt.value;
-  send(msg);
-}
-  </script>
+  <script type = "text/javascript" src="walle.js"></script>
 </html>
