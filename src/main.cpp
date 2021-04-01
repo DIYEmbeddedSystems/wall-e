@@ -51,7 +51,8 @@
 
 /* Motors */
 #include "MotorShield.h"
-/* Note: motor shield should be programmed, see: https://hackaday.io/project/162981-wemos-motor-shield-firmware-for-steppers-i2c */
+/* Note: motor shield should be programmed, see: https://hackaday.io/project/18439-motor-shield-reprogramming
+ */
 
 /* GY-80 IMU (Inertial measurement unit) */
 #include "GY-80.h"
